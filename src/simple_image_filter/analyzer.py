@@ -1,172 +1,144 @@
-"""
-Image analyzer module for detecting unrealistic images based on RGB histogram analysis.
-"""
-
-import os
-import cv2
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Union
-import logging
-from .histogram import analyze_histogram, find_histogram_peaks
+from PIL import Image, ImageStat
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+def calculate_brightness(image_array):
+    """
+    Calculate the perceived brightness of an image.
+    Returns a value between 0 (completely black) and 255 (completely white).
+    """
+    # Convert to grayscale if it's a color image
+    if len(image_array.shape) == 3:
+        # Use standard luminance formula
+        r, g, b = image_array[:,:,0], image_array[:,:,1], image_array[:,:,2]
+        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+    else:
+        gray = image_array
+    
+    return np.mean(gray)
 
-class ImageAnalyzer:
+def calculate_contrast(image_array):
     """
-    Analyzer for detecting unrealistic images based on RGB histogram patterns.
-    
-    This class analyzes RGB histograms in images to detect the characteristic
-    3-spike pattern with low standard deviation that often indicates artificially
-    generated or problematic images.
+    Calculate the contrast of an image.
+    Returns the standard deviation of pixel values.
     """
+    # Convert to grayscale if it's a color image
+    if len(image_array.shape) == 3:
+        r, g, b = image_array[:,:,0], image_array[:,:,1], image_array[:,:,2]
+        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+    else:
+        gray = image_array
     
-    def __init__(
-        self, 
-        peak_threshold: float = 0.1, 
-        max_peaks: int = 3, 
-        std_dev_threshold: float = 15.0,
-        min_peak_height_ratio: float = 0.2
-    ):
-        """
-        Initialize the image analyzer with configurable thresholds.
-        
-        Args:
-            peak_threshold: Minimum height ratio for a peak to be considered significant
-            max_peaks: Maximum number of peaks to look for (default 3)
-            std_dev_threshold: Maximum standard deviation for pixel intensities to flag as unrealistic
-            min_peak_height_ratio: Minimum ratio of peak height to mean height to be considered a spike
-        """
-        self.peak_threshold = peak_threshold
-        self.max_peaks = max_peaks
-        self.std_dev_threshold = std_dev_threshold
-        self.min_peak_height_ratio = min_peak_height_ratio
-        logger.info(f"Initialized ImageAnalyzer with peak_threshold={peak_threshold}, "
-                   f"max_peaks={max_peaks}, std_dev_threshold={std_dev_threshold}")
+    return np.std(gray)
+
+def calculate_saturation(image_array):
+    """
+    Calculate the average saturation of an image.
+    Returns a value between 0 (grayscale) and 1 (fully saturated).
+    """
+    # Only applicable to color images
+    if len(image_array.shape) < 3 or image_array.shape[2] < 3:
+        return 0
     
-    def load_image(self, image_path: str) -> np.ndarray:
-        """
-        Load an image from a file path.
-        
-        Args:
-            image_path: Path to the image file
-            
-        Returns:
-            np.ndarray: The loaded image in BGR format
-            
-        Raises:
-            FileNotFoundError: If the image file does not exist
-            ValueError: If the image cannot be loaded
-        """
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
-        
-        img = cv2.imread(image_path)
-        if img is None:
-            raise ValueError(f"Failed to load image: {image_path}")
-        
-        return img
+    # Convert RGB to HSV and extract saturation channel
+    from skimage.color import rgb2hsv
+    hsv = rgb2hsv(image_array)
+    saturation = hsv[:, :, 1]
     
-    def analyze_image(self, image: Union[str, np.ndarray]) -> Dict:
-        """
-        Analyze an image to determine if it has unrealistic histogram characteristics.
-        
-        Args:
-            image: Either a path to an image file or a numpy array containing the image
-            
-        Returns:
-            Dict containing analysis results:
-                - is_realistic: Boolean indicating if the image has realistic histograms
-                - reason: String explaining why the image was flagged (if applicable)
-                - channel_stats: Dictionary with statistics for each color channel
-        """
-        # Load the image if a path was provided
-        if isinstance(image, str):
-            img = self.load_image(image)
-        else:
-            img = image.copy()
-        
-        # Ensure the image is in BGR format (OpenCV default)
-        if len(img.shape) < 3 or img.shape[2] != 3:
-            if len(img.shape) == 2:  # Grayscale image
-                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            else:
-                raise ValueError("Image must have 3 channels (BGR/RGB)")
-        
-        # Analyze the histograms for each channel
-        channels = ["blue", "green", "red"]
-        channel_stats = {}
-        unrealistic_channels = []
-        
-        for i, channel_name in enumerate(channels):
-            # Extract the channel
-            channel = img[:, :, i]
-            
-            # Calculate histogram
-            hist = cv2.calcHist([channel], [0], None, [256], [0, 256])
-            hist = hist.flatten() / hist.sum()  # Normalize
-            
-            # Find peaks in the histogram
-            peaks, properties = find_histogram_peaks(
-                hist, 
-                height=self.peak_threshold,
-                distance=10,
-                prominence=0.05
-            )
-            
-            # Calculate standard deviation
-            std_dev = np.std(channel)
-            
-            # Analyze histogram shape
-            histogram_analysis = analyze_histogram(
-                hist, 
-                peaks, 
-                self.max_peaks, 
-                self.min_peak_height_ratio
-            )
-            
-            # Store stats for this channel
-            channel_stats[channel_name] = {
-                "std_dev": float(std_dev),
-                "peak_count": len(peaks),
-                "peaks": peaks.tolist(),
-                "histogram": hist.tolist(),
-                "has_spike_pattern": histogram_analysis["has_spike_pattern"]
-            }
-            
-            # Check if this channel has unrealistic characteristics
-            if (histogram_analysis["has_spike_pattern"] and std_dev < self.std_dev_threshold):
-                unrealistic_channels.append(channel_name)
-        
-        # Determine if the image is realistic based on channel analysis
-        is_realistic = len(unrealistic_channels) < 2  # Flag if 2+ channels are unrealistic
-        
-        reason = ""
-        if not is_realistic:
-            reason = f"Detected unrealistic histogram patterns in {', '.join(unrealistic_channels)} channels"
-            if len(unrealistic_channels) == 3:
-                reason += " with characteristic 3-spike pattern and low standard deviation"
-        
-        logger.info(f"Image analyzed: realistic={is_realistic}")
-        if not is_realistic:
-            logger.info(f"Rejection reason: {reason}")
-        
-        return {
-            "is_realistic": is_realistic,
-            "reason": reason,
-            "channel_stats": channel_stats
-        }
+    return np.mean(saturation)
+
+def calculate_sharpness(image_array):
+    """
+    Estimate image sharpness using Laplacian variance.
+    Higher values indicate sharper images.
+    """
+    from scipy import ndimage
     
-    def is_image_realistic(self, image: Union[str, np.ndarray]) -> bool:
-        """
-        Quick check if an image has realistic histogram characteristics.
+    # Convert to grayscale if it's a color image
+    if len(image_array.shape) == 3:
+        r, g, b = image_array[:,:,0], image_array[:,:,1], image_array[:,:,2]
+        gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+    else:
+        gray = image_array
+    
+    # Apply Laplacian filter
+    laplacian = np.abs(ndimage.laplace(gray))
+    
+    return np.var(laplacian)
+
+def is_image_ok(image, thresholds=None):
+    """
+    Primary function to determine if an image is of acceptable quality.
+    
+    Parameters:
+    -----------
+    image : PIL.Image.Image or numpy.ndarray
+        The image to analyze
+    thresholds : dict, optional
+        Dictionary of threshold values for various metrics.
+        If None, default thresholds will be used.
         
-        Args:
-            image: Either a path to an image file or a numpy array containing the image
-            
-        Returns:
-            Boolean indicating if the image has realistic histograms
-        """
-        analysis = self.analyze_image(image)
-        return analysis["is_realistic"]
+    Returns:
+    --------
+    bool
+        True if the image passes quality checks, False otherwise
+    dict
+        Detailed analysis results with individual metric scores
+    """
+    # Default thresholds
+    default_thresholds = {
+        'brightness_min': 40,     # Minimum acceptable brightness
+        'brightness_max': 220,    # Maximum acceptable brightness
+        'contrast_min': 15,       # Minimum acceptable contrast
+        'saturation_min': 0.1,    # Minimum acceptable saturation
+        'saturation_max': 0.9,    # Maximum acceptable saturation
+        'sharpness_min': 100      # Minimum acceptable sharpness
+    }
+    
+    # Use provided thresholds or defaults
+    if thresholds is None:
+        thresholds = default_thresholds
+    else:
+        # Update default thresholds with any provided values
+        for key, value in thresholds.items():
+            default_thresholds[key] = value
+        thresholds = default_thresholds
+    
+    # Convert PIL Image to numpy array if needed
+    if isinstance(image, Image.Image):
+        image_array = np.array(image)
+    else:
+        image_array = image
+        
+    # Calculate metrics
+    brightness = calculate_brightness(image_array)
+    contrast = calculate_contrast(image_array)
+    saturation = calculate_saturation(image_array)
+    sharpness = calculate_sharpness(image_array)
+    
+    # Evaluate against thresholds
+    is_brightness_ok = thresholds['brightness_min'] <= brightness <= thresholds['brightness_max']
+    is_contrast_ok = contrast >= thresholds['contrast_min']
+    is_saturation_ok = thresholds['saturation_min'] <= saturation <= thresholds['saturation_max']
+    is_sharpness_ok = sharpness >= thresholds['sharpness_min']
+    
+    # Overall result - image is OK if all checks pass
+    overall_result = all([
+        is_brightness_ok,
+        is_contrast_ok, 
+        is_saturation_ok,
+        is_sharpness_ok
+    ])
+    
+    # Detailed analysis results
+    details = {
+        'brightness': brightness,
+        'contrast': contrast,
+        'saturation': saturation,
+        'sharpness': sharpness,
+        'is_brightness_ok': is_brightness_ok,
+        'is_contrast_ok': is_contrast_ok,
+        'is_saturation_ok': is_saturation_ok,
+        'is_sharpness_ok': is_sharpness_ok
+    }
+    
+    return overall_result, details

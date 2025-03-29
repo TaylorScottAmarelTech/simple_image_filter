@@ -1,19 +1,19 @@
 """
-Simple Image Filter
-=====================
-
-A package for filtering unrealistic images based on RGB histogram analysis.
-Detects images with abnormal histograms showing 3 distinct spikes with 
-small standard deviation.
+Simple Image Filter - A package for analyzing and filtering images.
 """
 
-__version__ = "0.1.0"
-
-from .analyzer import ImageAnalyzer
-from .histogram import analyze_histogram, find_histogram_peaks
+from .analyzer import (
+    calculate_brightness,
+    calculate_contrast,
+    calculate_saturation,
+    calculate_sharpness,
+    is_image_ok  # Expose the new function
+)
 
 __all__ = [
-    'ImageAnalyzer',
-    'analyze_histogram',
-    'find_histogram_peaks',
+    'calculate_brightness',
+    'calculate_contrast',
+    'calculate_saturation',
+    'calculate_sharpness',
+    'is_image_ok'
 ]

@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+src/simple_image_filter/__init__.py
+src/simple_image_filter/analyzer.py
+src/simple_image_filter/cli.py
+src/simple_image_filter/histogram.py
+src/simple_image_filter.egg-info/PKG-INFO
+src/simple_image_filter.egg-info/SOURCES.txt
+src/simple_image_filter.egg-info/dependency_links.txt
+src/simple_image_filter.egg-info/entry_points.txt
+src/simple_image_filter.egg-info/requires.txt
+src/simple_image_filter.egg-info/top_level.txt
+tests/test_analyzer.py

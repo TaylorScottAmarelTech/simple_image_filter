@@ -1,0 +1,2 @@
+[console_scripts]
+imgfilter = simple_image_filter.cli:main
